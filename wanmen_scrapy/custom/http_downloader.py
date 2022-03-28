@@ -2,13 +2,14 @@
 
 import requests
 import os
+import sys
 import locale
 from contextlib import closing
 
 def write_file(response, path_with_filename, stream=True):
     with open(path_with_filename, 'wb')as f:
         if stream is True:
-            for response_data in response.iter_content(10240):
+            for response_data in response.iter_content(1048576):  # 1024 * 1024
                 f.write(response_data)
         else:
             f.write(response.content())
@@ -22,7 +23,7 @@ def download(url, params=None, path='.', filename=None, headers=None, data=None,
             elif isinstance(data, dict):
                 response = requests.post(url=url, data=data, headers=headers, stream=stream, timeout=60)
             else:
-                print(u'data 格式错误，应该为dict')
+                sys.stderr.write(u'data 格式错误，应该为dict')
         except Exception as e:
             print(e)
             continue

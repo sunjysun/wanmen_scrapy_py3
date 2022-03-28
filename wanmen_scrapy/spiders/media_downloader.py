@@ -38,23 +38,15 @@ class MediaDownloaderSpider(scrapy.Spider):
                                 pass
                             break
                     elif strtobool(self.down_docs) and fn.lower() == 'info.json':
-                        with open(os.path.join(cur_dir, fn), encoding='utf-8') as f:
-                            s = f.read()
-                        dic = json.loads(s)
-                        lst = dic.get("documents", [])
-                        for dic_doc in lst:
-                            u = dic_doc['url']
-                            fn_doc = u.rsplit('/', 1)[1]
-                            if os.path.isfile(os.path.join(cur_dir, fn_doc)):
-                                logging.info(f'已存在: {os.path.join(cur_dir, fn_doc)}')
-                            else:
-                                while True:
-                                    try:
-                                        path_filename_doc = download(u, path=cur_dir)
-                                    except:
-                                        continue
-                                    break
-                                logging.info(f'已下载: {path_filename_doc}')
+                        # self.download_docs(cur_dir, fn)
+                        gnr = self.download_docs(cur_dir, fn)
+                        while True:
+                            try:
+                                yield next(gnr)
+                                continue
+                            except StopIteration:
+                                pass
+                            break
                 continue
             except StopIteration:
                 pass
@@ -83,6 +75,14 @@ class MediaDownloaderSpider(scrapy.Spider):
                 logging.info(f'已存在: {pathfn}')
             else:
                 yield scrapy.Request(u, meta={'pathfn': pathfn}, headers=self.headers, callback=self.parse)
+                '''while True:
+                    try:
+                        path_filename_doc = download(u, path=cur_dir)
+                    except Exception as e:
+                        logging.warn(e)
+                        continue
+                    break
+                logging.info(f'已下载: {path_filename_doc}')'''
                 
     def parse(self, response):
         pathfn = response.meta['pathfn']
