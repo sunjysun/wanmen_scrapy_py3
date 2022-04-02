@@ -17,10 +17,10 @@ class MediaDownloaderSpider(scrapy.Spider):
         'content-type': 'application/json',
     }
 
-    def __init__(self, root_path='wanmen', docs='True', ts='True'):
+    # down_type: ts pdf doc quiz
+    def __init__(self, root_path='wanmen', down_type='all'):
         self.root_path = root_path
-        self.down_docs = docs
-        self.down_ts = ts
+        self.down_type = down_type
         
     def start_requests(self):
         walker = os.walk(self.root_path)
@@ -28,25 +28,40 @@ class MediaDownloaderSpider(scrapy.Spider):
             try:
                 cur_dir, dirs, files = next(walker)
                 for fn in files:
-                    if strtobool(self.down_ts) and fn.lower().endswith('.m3u8'):
-                        gnr = self.download_ts(cur_dir, fn)
-                        while True:
-                            try:
-                                yield next(gnr)
-                                continue
-                            except StopIteration:
-                                pass
-                            break
-                    elif strtobool(self.down_docs) and fn.lower() == 'info.json':
-                        # self.download_docs(cur_dir, fn)
-                        gnr = self.download_docs(cur_dir, fn)
-                        while True:
-                            try:
-                                yield next(gnr)
-                                continue
-                            except StopIteration:
-                                pass
-                            break
+                    if fn.lower().endswith('.m3u8'):
+                        if 'all' == self.down_type or 'ts' == self.down_type:
+                            gnr = self.download_ts(cur_dir, fn)
+                            while True:
+                                try:
+                                    yield next(gnr)
+                                    continue
+                                except StopIteration:
+                                    pass
+                                break
+                    elif fn.lower() == 'info.json':
+                        if 'all' == self.down_type or 'doc' == self.down_type:
+                            # self.download_docs(cur_dir, fn)
+                            gnr = self.download_docs(cur_dir, fn)
+                            while True:
+                                try:
+                                    yield next(gnr)
+                                    continue
+                                except StopIteration:
+                                    pass
+                                break
+                    elif fn.lower() == 'letctures.json':
+                        pass
+                    elif fn.lower().endswith('.json'):
+                        if 'all' == self.down_type or 'pdf' == self.down_type:
+                            # self.download_docs(cur_dir, fn)
+                            gnr = self.download_pdf(cur_dir, fn)
+                            while True:
+                                try:
+                                    yield next(gnr)
+                                    continue
+                                except StopIteration:
+                                    pass
+                                break
                 continue
             except StopIteration:
                 pass
@@ -84,7 +99,49 @@ class MediaDownloaderSpider(scrapy.Spider):
                     break
                 logging.info(f'已下载: {path_filename_doc}')'''
                 
+    ## 以下方法正在建设中
+    def download_pdf(self, cur_dir, fn):
+        with open(os.path.join(cur_dir, fn), encoding='utf-8') as f:
+            s = f.read()
+        dic = json.loads(s)
+        dic_pdf = dic.get('pdf')
+        url_pdf = None
+        if dic_pdf:
+            url_pdf = dic_pdf.get('url')
+            name_pdf = dic_pdf.get('name')
+        if url_pdf:
+            if name_pdf:
+                pass
+            else:
+                name_pdf = url_pdf.rsplit('/', 1)[-1].split('?', 1)[0]
+            name_pdf = self.folder_name_filter([name_pdf])[0]
+            pathfn = os.path.join(cur_dir, name_pdf)
+            hdrs = dict(self.headers)
+            hdrs['sec-ch-ua'] = '" Not A;Brand";v="99", "Chromium";v="100", "Microsoft Edge";v="100"'
+            yield scrapy.Request(url_pdf, headers=hdrs, meta={'pathfn': pathfn, 'handle_httpstatus_list': [200, 401]}, callback=self.parse)
+        
     def parse(self, response):
         pathfn = response.meta['pathfn']
         with open(pathfn, 'wb') as f:
             f.write(response.body)
+        logging.info(f'已下载 - HTTP_Code {response.status} : {pathfn}: {response.url}')
+
+    @staticmethod
+    def folder_name_filter(folder_name_lst):
+        ret_lst = list()
+        for folder_name in folder_name_lst:
+            folder_name = folder_name.strip()
+            folder_name = folder_name.replace('/', u'／')\
+                                     .replace('\\', u'、')\
+                                     .replace(':', u'：')\
+                                     .replace('*', u'·')\
+                                     .replace('?', u'？') \
+                                     .replace('"', u'“') \
+                                     .replace('<', u'《')\
+                                     .replace('>', u'》')\
+                                     .replace('|', u'¦')\
+                                     .replace('\b', '')
+            ret_lst.append(folder_name)
+        if isinstance(folder_name_lst, str):
+            ret_lst = ''.join(ret_lst)
+        return ret_lst

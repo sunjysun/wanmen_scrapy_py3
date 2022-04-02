@@ -141,19 +141,31 @@ class CourseSpiderSpider(scrapy.Spider):
             f.write(response.body)
         dic = response.json()
         lst_lectures = dic['lectures']
+        for dic_phase in dic.get('phases', []):
+            lst_lectures.extend(dic_phase['lectures'])
         for dic_lecture in lst_lectures:
-            lecture_prefix = dic_lecture['prefix']
+            lecture_prefix = dic_lecture.get('prefix')
+            lecture_order = dic_lecture['order']
             lecture_name = dic_lecture['name']
-            lecture_prefix_name = '_'.join(self.folder_name_filter([f'第{lecture_prefix}讲', lecture_name]))
+            if lecture_prefix:
+                lecture_prefix_name = '_'.join(self.folder_name_filter([f'{lecture_order}', f'第{lecture_prefix}讲', lecture_name]))
+            else:
+                lecture_prefix_name = '_'.join(self.folder_name_filter([f'{lecture_order}', lecture_name]))
             lecture_path = os.path.join(course_path, lecture_prefix_name)
             lst_children = dic_lecture['children']
             for dic_child in lst_children:
                 video_id = dic_child['_id']
-                video_prefix = dic_child['prefix']
+                video_prefix = '_'.join([f"{dic_child['order']}", dic_child.get('prefix')]).rstrip('_')
                 video_name = dic_child['name']
                 video_prefix_name = '_'.join(self.folder_name_filter([video_prefix, video_name]))
                 video_path = os.path.join(lecture_path, video_prefix_name)
-                yield scrapy.Request(self.lecture_video_url % (video_id), headers=self.headers, meta={'video_path': video_path, 'video_id': video_id}, callback=self.parse_video)
+                if dic_child['assetType'].strip() == 'quiz':
+                    quiz_pack_id = response.json()['quizStatus']['quiz_pack_id']
+                    body = '{"operationName":"Quiz","variables":{"quizPackId":"' + quiz_pack_id + '","shuffle":true},"query":"query Quiz($quizPackId: String!, $shuffle: Boolean!) {\\n  lectureQuizPack(quizPackId: $quizPackId, shuffle: $shuffle) {\\n    id\\n    courseId\\n    lectureId\\n    quizzes {\\n      id\\n      quizPackId\\n      title\\n      explanation\\n      quizType\\n      options {\\n        id\\n        quizId\\n        description\\n        __typename\\n      }\\n      __typename\\n    }\\n    __typename\\n  }\\n}\\n"}'
+                    pathfn = os.path.join(*(self.folder_name_filter([video_path, quiz_pack_id])))
+                    yield scrapy.Request(self.start_urls[0], method='POST', headers=self.headers, body=body, meta={'pathfn': pathfn}, callback=self.parse_file)
+                else:
+                    yield scrapy.Request(self.lecture_video_url % (video_id), headers=self.headers, meta={'video_path': video_path, 'video_id': video_id}, callback=self.parse_video)
                 
     def parse_video(self, response):
         video_path = response.meta['video_path']
@@ -163,14 +175,19 @@ class CourseSpiderSpider(scrapy.Spider):
             f.write(response.body)
         if response.json()['assetType'] == 'video':
             m3u8_url = get_m3u8_url(json_content=json.dumps(response.json()))
-            yield scrapy.Request(m3u8_url, headers=self.headers, meta={'video_path': video_path}, callback=self.parse_m3u8, priority=20)
-        elif response.json()['assetType'] == 'quiz':
-            quiz_pack_id = response.json()['quizStatus']['quiz_pack_id']
-            body = '{"operationName":"Quiz","variables":{"quizPackId":"' + quiz_pack_id + '","shuffle":true},"query":"query Quiz($quizPackId: String!, $shuffle: Boolean!) {\\n  lectureQuizPack(quizPackId: $quizPackId, shuffle: $shuffle) {\\n    id\\n    courseId\\n    lectureId\\n    quizzes {\\n      id\\n      quizPackId\\n      title\\n      explanation\\n      quizType\\n      options {\\n        id\\n        quizId\\n        description\\n        __typename\\n      }\\n      __typename\\n    }\\n    __typename\\n  }\\n}\\n"}'
-            yield scrapy.Request(self.start_urls[0], method='POST', headers=self.headers, body=body, meta={'video_path': video_path, 'quiz_pack_id': quiz_pack_id}, callback=self.parse_quiz)
+            pathfn = os.path.join(*(self.folder_name_filter([video_path, response.url.rsplit("/", 1)[-1].split("?", 1)[0]])))
+            yield scrapy.Request(m3u8_url, headers=self.headers, meta={'pathfn': pathfn}, callback=self.parse_file, priority=20)
+        elif response.json()['assetType'] == 'pdf':
+            url_pdf = response.json()['pdf']['url']
+            name_pdf = response.json()['pdf']['name']
+            pathfn = os.path.join(*(self.folder_name_filter([video_path, name_pdf])))
+            hdrs = {
+                'sec-ch-ua': '" Not A;Brand";v="99", "Chromium";v="100", "Microsoft Edge";v="100"'
+            }
+            yield scrapy.Request(url_pdf, headers=hdrs, meta={'pathfn': pathfn}, callback=self.parse_file)
         
-    def parse_m3u8(self, response):
-        with open(os.path.join(response.meta['video_path'], response.url.rsplit("?", 1)[0].rsplit("/", 1)[1]), 'wb') as f:
+    def parse_file(self, response):
+        with open(, 'wb') as f:
             f.write(response.body)
             
     def parse_quiz(self, response):
